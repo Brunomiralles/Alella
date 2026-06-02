@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anàlisi bivariant de l'aparcament: Ocupació vs. Rotació</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-fullscreen@1.0.2/dist/leaflet.fullscreen.css"/>
+<style>
+/* ── Reset ── */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif}
+
+/* ── Layout ── */
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:280px;flex-shrink:0;display:flex;flex-direction:column;
+  overflow-y:auto;transition:background .3s,color .3s;z-index:500;
+  box-shadow:2px 0 12px rgba(0,0,0,.15)}
+.sidebar.light{background:#fafaf8;color:#1a1a1a}
+.sidebar.dark{background:#1c1c1e;color:#f0f0ee}
+#map{flex:1;min-width:0}
+
+/* ── Sidebar sections ── */
+.sb-header{padding:18px 18px 14px;border-bottom:1px solid rgba(128,128,128,.15)}
+.sb-title{font-size:17px;font-weight:700;line-height:1.3;margin-bottom:5px}
+.sb-subtitle{font-size:11.5px;opacity:.65;line-height:1.55}
+.sb-section{padding:14px 18px;border-bottom:1px solid rgba(128,128,128,.12)}
+.sb-section-title{font-size:10px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.07em;opacity:.5;margin-bottom:10px}
+
+/* ── Legend grid ── */
+.legend-wrap{display:flex;gap:10px;align-items:flex-start;margin-top:4px}
+.legend-axes-y{display:flex;flex-direction:column;align-items:center;
+  justify-content:space-between;padding-right:6px;padding-top:2px}
+.ax-label-y{font-size:9px;font-weight:700;opacity:.6;letter-spacing:.05em;
+  text-transform:uppercase;white-space:nowrap}
+.ax-arrow-y{font-size:11px;opacity:.45;line-height:1;margin:4px 0;
+  writing-mode:vertical-rl;transform:rotate(180deg);
+  font-weight:600;letter-spacing:.04em;opacity:.5}
+.legend-right{display:flex;flex-direction:column;gap:0}
+.legend-grid{display:grid;grid-template-columns:repeat(3,34px);
+  grid-template-rows:repeat(3,34px);gap:3px}
+.lc{border-radius:4px;cursor:pointer;transition:transform .12s,box-shadow .12s;
+  border:1.5px solid rgba(0,0,0,.1)}
+.lc:hover{transform:scale(1.15);box-shadow:0 2px 8px rgba(0,0,0,.25);z-index:2;position:relative}
+.lc.dimmed{opacity:.18 !important}
+.lc.highlighted{transform:scale(1.1);box-shadow:0 0 0 2.5px rgba(0,0,0,.55)}
+.legend-axes-x{display:flex;justify-content:space-between;align-items:center;
+  margin-top:5px;width:108px}
+.ax-x-label{font-size:9px;font-weight:700;opacity:.6;letter-spacing:.04em;
+  text-transform:uppercase}
+.ax-x-arrow{font-size:10px;opacity:.4;font-weight:600}
+
+/* ── Class stats ── */
+.class-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.class-chip{border-radius:4px;padding:4px 5px;text-align:center;font-size:10px;
+  font-weight:700;cursor:pointer;transition:opacity .15s,transform .15s;
+  border:1px solid rgba(0,0,0,.1)}
+.class-chip:hover{transform:scale(1.05)}
+
+/* ── Color key ── */
+.color-key{display:flex;flex-wrap:wrap;gap:5px}
+.ck-item{display:flex;align-items:center;gap:5px;font-size:10.5px}
+.ck-swatch{width:12px;height:12px;border-radius:2px;flex-shrink:0;
+  border:1px solid rgba(0,0,0,.1)}
+
+/* ── Controls ── */
+.ctrl-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.ctrl-btn{padding:5px 10px;border-radius:5px;border:1px solid rgba(128,128,128,.3);
+  background:transparent;font-size:11px;cursor:pointer;font-weight:500;
+  transition:background .15s;color:inherit}
+.ctrl-btn:hover{background:rgba(128,128,128,.15)}
+.ctrl-btn.active{background:rgba(128,128,128,.25)}
+
+/* ── Popup ── */
+.bv-popup{min-width:200px;max-width:260px;font-size:12px}
+.bv-popup .region-name{font-size:14px;font-weight:700;margin-bottom:6px;
+  display:flex;align-items:center;gap:8px}
+.bv-popup .cls-badge{display:inline-block;padding:2px 8px;border-radius:4px;
+  font-size:11px;font-weight:700}
+.bv-popup table{width:100%;border-collapse:collapse;margin-top:6px}
+.bv-popup td{padding:3px 0;font-size:11px;border-bottom:1px solid rgba(128,128,128,.1)}
+.bv-popup td:first-child{color:#888;width:45%;font-weight:500}
+.bv-popup td:last-child{font-weight:500;text-align:right}
+
+/* ── Tooltip ── */
+.bv-tooltip{background:rgba(255,255,255,.96);color:#1a1a1a;
+  padding:5px 10px;border-radius:4px;font-size:12px;font-weight:600;
+  box-shadow:0 2px 8px rgba(0,0,0,.2);pointer-events:none;
+  border-left:4px solid #555}
+
+/* ── Leaflet overrides ── */
+.leaflet-container{font-family:inherit}
+.leaflet-control-attribution{font-size:10px}
+</style>
+</head>
+<body>
+<div class="app">
+
+<div class="sidebar light" id="sidebar">
+
+  <div class="sb-header">
+    <div class="sb-title" id="sb-title">Anàlisi bivariant de l'aparcament: Ocupació vs. Rotació</div>
+    <div class="sb-subtitle" id="sb-subtitle">Relació entre el percentatge d'ocupació i els usos per plaça</div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-title">Legend</div>
+    <div class="legend-wrap">
+
+      <div class="legend-axes-y" style="height:108px">
+        <div class="ax-label-y" style="writing-mode:vertical-rl;transform:rotate(180deg)">High</div>
+        <div class="ax-x-arrow" style="writing-mode:vertical-rl;transform:rotate(180deg)">↑</div>
+        <div class="ax-label-y" style="writing-mode:vertical-rl;transform:rotate(180deg)">Low</div>
+      </div>
+
+      <div class="legend-right">
+        <div class="legend-grid" id="legend-grid">
+          <div class="lc" data-cls="C1" style="background:#FF0000" title="C1"></div>
+          <div class="lc" data-cls="C2" style="background:#800000" title="C2"></div>
+          <div class="lc" data-cls="C3" style="background:#000000" title="C3"></div>
+          <div class="lc" data-cls="B1" style="background:#FF8080" title="B1"></div>
+          <div class="lc" data-cls="B2" style="background:#804080" title="B2"></div>
+          <div class="lc" data-cls="B3" style="background:#000080" title="B3"></div>
+          <div class="lc" data-cls="A1" style="background:#FFFFFF" title="A1"></div>
+          <div class="lc" data-cls="A2" style="background:#8080FF" title="A2"></div>
+          <div class="lc" data-cls="A3" style="background:#0000FF" title="A3"></div>
+        </div>
+        <div class="legend-axes-x">
+          <span class="ax-x-label">Low</span>
+          <span class="ax-x-arrow">→</span>
+          <span class="ax-x-label">High</span>
+        </div>
+        <div style="font-size:9px;font-weight:700;opacity:.5;text-align:center;
+          margin-top:3px;letter-spacing:.04em;text-transform:uppercase">% Ocupació</div>
+      </div>
+
+    </div>
+
+    <div style="font-size:9px;font-weight:700;opacity:.5;margin-top:6px;
+      letter-spacing:.04em;text-transform:uppercase">Usos per plaça</div>
+
+    <div style="margin-top:6px;font-size:10.5px;opacity:.5">
+      Hover a cell to highlight regions on the map
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-title">Variables</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:18px;height:18px;border-radius:3px;
+          background:linear-gradient(135deg,#FFFFFF,#FF0000);
+          border:1px solid rgba(0,0,0,.1);flex-shrink:0"></div>
+        <div>
+          <div style="font-size:12px;font-weight:600">% Ocupació</div>
+          <div style="font-size:10.5px;opacity:.55">Horizontal axis</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:18px;height:18px;border-radius:3px;
+          background:linear-gradient(135deg,#FFFFFF,#0000FF);
+          border:1px solid rgba(0,0,0,.1);flex-shrink:0"></div>
+        <div>
+          <div style="font-size:12px;font-weight:600">Usos per plaça</div>
+          <div style="font-size:10.5px;opacity:.55">Vertical axis</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-title">Class distribution</div>
+    <div class="class-grid" id="class-grid"></div>
+    
+    <div style="margin-top:12px;font-size:11px;opacity:.8;display:flex;align-items:center;gap:8px;">
+      <div class="lc" data-cls="NA" style="background:#808080;width:14px;height:14px;border-radius:2px;border:1px solid rgba(0,0,0,.2);cursor:pointer;" title="NA"></div>
+      <span id="na-count-text">No data / unclassified (0)</span>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-title">Palette · Custom</div>
+    <div class="color-key" id="color-key"></div>
+  </div>
+
+  <div class="sb-section">
+    <div class="sb-section-title">Controls</div>
+    <div class="ctrl-row">
+      <button class="ctrl-btn" id="theme-btn" onclick="toggleTheme()">☾ Dark mode</button>
+      <button class="ctrl-btn" id="reset-btn" onclick="resetHighlight()">Reset highlight</button>
+    </div>
+    <div class="ctrl-row" style="margin-top:8px">
+      <select id="bm-select" onchange="switchBasemap(this.value)"
+        style="padding:5px 8px;border-radius:5px;border:1px solid rgba(128,128,128,.3);
+          background:transparent;font-size:11px;cursor:pointer;color:inherit">
+      </select>
+    </div>
+  </div>
+
+</div><div id="map"></div>
+
+</div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-fullscreen@1.0.2/dist/Leaflet.fullscreen.min.js"></script>
+<script>
+// ── Data ──────────────────────────────────────────────
+const GEOJSON    = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"_cls": "A2", "_label": "", "_fill": "#8080FF", "_stroke": "#5353a5", "Name": "Can Calder\u00f3", "ID": "1", "% Ocupacio": "0.841", "Usos Plaç": "2.163636364", "Var1_Class": "2", "Var2_Class": "A", "Bi_Class": "A2"}, "geometry": {"coordinates": [[[[2.2963102265509066, 41.49591322731576, 0.0], [2.2962105303738825, 41.495869719668704, 0.0], [2.2959714530680326, 41.49581773258473, 0.0], [2.2959190252759645, 41.49597565623792, 0.0], [2.2959143, 41.49615570000002, 0.0], [2.296445400000001, 41.49626609999999, 0.0], [2.2965339000000005, 41.4961094, 0.0], [2.2963676, 41.4959728, 0.0], [2.2963102265509066, 41.49591322731576, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "B1", "_label": "", "_fill": "#FF8080", "_stroke": "#a55353", "Name": "Els Plumerus", "ID": "2", "% Ocupacio": "0.743", "Usos Plaç": "2.828571429", "Var1_Class": "1", "Var2_Class": "B", "Bi_Class": "B1"}, "geometry": {"coordinates": [[[[2.291729223765895, 41.49369637543931, 0.0], [2.2915828000000005, 41.493972, 0.0], [2.2920174, 41.494199099999996, 0.0], [2.292363278477643, 41.49391953287571, 0.0], [2.292247386609588, 41.4938501835569, 0.0], [2.292119754233722, 41.493927567120565, 0.0], [2.291729223765895, 41.49369637543931, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "C2", "_label": "", "_fill": "#800000", "_stroke": "#530000", "Name": "Bossa Santa Eul\u00e0lia", "ID": "3", "% Ocupacio": "0.813", "Usos Plaç": "3.6875", "Var1_Class": "2", "Var2_Class": "C", "Bi_Class": "C2"}, "geometry": {"coordinates": [[[[2.2942995, 41.4945507, 0.0], [2.2938574615691545, 41.49444825435776, 0.0], [2.293766860336585, 41.494618335333826, 0.0], [2.29427, 41.4947094, 0.0], [2.2942995, 41.4945507, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "C3", "_label": "", "_fill": "#000000", "_stroke": "#000000", "Name": "Mercat", "ID": "4", "% Ocupacio": "0.912", "Usos Plaç": "4.024390244", "Var1_Class": "3", "Var2_Class": "C", "Bi_Class": "C3"}, "geometry": {"coordinates": [[[[2.2947865000000003, 41.492857900000004, 0.0], [2.2946819000000005, 41.49326970000001, 0.0], [2.2950896, 41.49333699999999, 0.0], [2.2951057, 41.493182299999994, 0.0], [2.2950923, 41.4928991, 0.0], [2.2947986, 41.4928609, 0.0], [2.2947865000000003, 41.492857900000004, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "C1", "_label": "", "_fill": "#FF0000", "_stroke": "#a50000", "Name": "Can Lleonart", "ID": "5", "% Ocupacio": "0.625", "Usos Plaç": "3.5", "Var1_Class": "1", "Var2_Class": "C", "Bi_Class": "C1"}, "geometry": {"coordinates": [[[[2.2956543, 41.4914153, 0.0], [2.2956154, 41.491469599999995, 0.0], [2.2952130000000004, 41.491983899999994, 0.0], [2.2954491000000004, 41.4920743, 0.0], [2.2957347, 41.4916986, 0.0], [2.2958997000000005, 41.491528800000005, 0.0], [2.2957964, 41.4914636, 0.0], [2.2957428, 41.491435399999986, 0.0], [2.2956543, 41.4914153, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "B2", "_label": "", "_fill": "#804080", "_stroke": "#532953", "Name": "Can Calder\u00f3 S", "ID": "8", "% Ocupacio": "0.898", "Usos Plaç": "3.133333333", "Var1_Class": "2", "Var2_Class": "B", "Bi_Class": "B2"}, "geometry": {"coordinates": [[[[2.2958497, 41.495070500000004, 0.0], [2.2959624, 41.49570340000001, 0.0], [2.2962734999999994, 41.495777700000005, 0.0], [2.2963405999999997, 41.49558279999999, 0.0], [2.2962628, 41.4955667, 0.0], [2.2961474000000006, 41.4950364, 0.0], [2.2958497, 41.495070500000004, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "A2", "_label": "", "_fill": "#8080FF", "_stroke": "#5353a5", "Name": "Sorli N", "ID": "11", "% Ocupacio": "0.765", "Usos Plaç": "0.0", "Var1_Class": "2", "Var2_Class": "A", "Bi_Class": "A2"}, "geometry": {"coordinates": [[[[2.2957768799704397, 41.49122948142221, 0.0], [2.2957997546054294, 41.49128522891292, 0.0], [2.2959177966077333, 41.491333615097346, 0.0], [2.2959176054669537, 41.49135126708108, 0.0], [2.295902135240684, 41.49137059084627, 0.0], [2.2960027704762433, 41.49140033457049, 0.0], [2.2961734103310385, 41.49114452551779, 0.0], [2.2963272521872566, 41.4909221544237, 0.0], [2.2963647344423417, 41.49084846114763, 0.0], [2.29634953189828, 41.49084307219501, 0.0], [2.2963143550686067, 41.490839326351775, 0.0], [2.2964027373126474, 41.49069952446608, 0.0], [2.296223446714839, 41.4906701824866, 0.0], [2.2961539696675293, 41.49079862537643, 0.0], [2.2961044202411056, 41.49082127124754, 0.0], [2.2960959358780912, 41.49084593374067, 0.0], [2.296053792496123, 41.49083508391969, 0.0], [2.2957768799704397, 41.49122948142221, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "A1", "_label": "", "_fill": "#FFFFFF", "_stroke": "#a5a5a5", "Name": "Sorli S1", "ID": "12", "% Ocupacio": "0.627", "Usos Plaç": "0.0", "Var1_Class": "1", "Var2_Class": "A", "Bi_Class": "A1"}, "geometry": {"coordinates": [[[[2.2962389440745996, 41.490557972875344, 0.0], [2.2965136897919765, 41.49065116869184, 0.0], [2.296892438675576, 41.49009581492582, 0.0], [2.2966313617272625, 41.48996981538212, 0.0], [2.2965330339428314, 41.49009361728187, 0.0], [2.2962389440745996, 41.490557972875344, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "A1", "_label": "", "_fill": "#FFFFFF", "_stroke": "#a5a5a5", "Name": "Sorli S2", "ID": "13", "% Ocupacio": "0.454", "Usos Plaç": "0.0", "Var1_Class": "1", "Var2_Class": "A", "Bi_Class": "A1"}, "geometry": {"coordinates": [[[[2.296894519047956, 41.49009028669384, 0.0], [2.297589182574908, 41.48928206700462, 0.0], [2.2974993378796156, 41.48923701194128, 0.0], [2.2975564154963535, 41.48914656045512, 0.0], [2.29739170950393, 41.48907781183683, 0.0], [2.2966385227250816, 41.48996708869933, 0.0], [2.2967820360700455, 41.49003928362306, 0.0], [2.296894519047956, 41.49009028669384, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "A1", "_label": "", "_fill": "#FFFFFF", "_stroke": "#a5a5a5", "Name": "Sorli S3", "ID": "14", "% Ocupacio": "0.299", "Usos Plaç": "0.0", "Var1_Class": "1", "Var2_Class": "A", "Bi_Class": "A1"}, "geometry": {"coordinates": [[[[2.2976035892831526, 41.48926874946084, 0.0], [2.2984533573825923, 41.488370939513715, 0.0], [2.298209367408334, 41.48824790758833, 0.0], [2.2978265725254015, 41.48865166938577, 0.0], [2.297770750259836, 41.48862594744928, 0.0], [2.297420532558224, 41.48905028315311, 0.0], [2.297582214312945, 41.489134921151376, 0.0], [2.2975289630858744, 41.489223251136515, 0.0], [2.2976035892831526, 41.48926874946084, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "B3", "_label": "", "_fill": "#000080", "_stroke": "#000053", "Name": "Centre", "ID": "15", "% Ocupacio": "0.979", "Usos Plaç": "2.547169811", "Var1_Class": "3", "Var2_Class": "B", "Bi_Class": "B3"}, "geometry": {"coordinates": [[[[2.2923401153384395, 41.494074626193566, 0.0], [2.2927449851583046, 41.49427015593903, 0.0], [2.292825682202716, 41.49419486631189, 0.0], [2.29329451390665, 41.49445513383631, 0.0], [2.2936223856776787, 41.493860870785724, 0.0], [2.2928615016942, 41.49352445342015, 0.0], [2.2923838363038467, 41.49390187471123, 0.0], [2.2924724703670307, 41.49397105621514, 0.0], [2.2923401153384395, 41.494074626193566, 0.0]]]], "type": "MultiPolygon"}}, {"type": "Feature", "properties": {"_cls": "B3", "_label": "", "_fill": "#000080", "_stroke": "#000053", "Name": "Heures", "ID": "17", "% Ocupacio": "0.939", "Usos Plaç": "2.27027027", "Var1_Class": "3", "Var2_Class": "B", "Bi_Class": "B3"}, "geometry": {"coordinates": [[[[2.2933209654515094, 41.4950922636035, 0.0], [2.293916028610547, 41.49533084455965, 0.0], [2.2945431933861027, 41.4955053461668, 0.0], [2.295506338179085, 41.49572468245029, 0.0], [2.295539544657896, 41.49563539013445, 0.0], [2.2943726277067427, 41.495379637626996, 0.0], [2.2939572193802427, 41.49526770463095, 0.0], [2.2933614246314136, 41.49502041841889, 0.0], [2.2933209654515094, 41.4950922636035, 0.0]]]], "type": "MultiPolygon"}}]};
+
+// ── Reparación automática de polígonos NA ──────────────
+GEOJSON.features.forEach(f => {
+  // Forzamos a NA las zonas que tienen Usos = 0
+  if (f.properties["Usos Plaç"] === "0.0" || f.properties["Usos Plaç"] == 0) {
+    f.properties.Bi_Class = "NA";
+    f.properties._cls = "NA";
+    f.properties._fill = "#808080";
+    f.properties._stroke = "#666666";
+  }
+});
+
+// ── Recálculo automático de contadores ────────────────
+const CLASS_COUNTS = {"A1":0, "A2":0, "A3":0, "B1":0, "B2":0, "B3":0, "C1":0, "C2":0, "C3":0, "NA":0};
+GEOJSON.features.forEach(f => {
+  let cls = f.properties.Bi_Class || f.properties._cls;
+  if(CLASS_COUNTS[cls] !== undefined) CLASS_COUNTS[cls]++;
+});
+
+const COLOR_MAP   = {"A1": "#FFFFFF", "A2": "#8080FF", "A3": "#0000FF", "B1": "#FF8080", "B2": "#804080", "B3": "#000080", "C1": "#FF0000", "C2": "#800000", "C3": "#000000", "NA": "#808080"};
+const BASEMAPS   = [{"name": "CartoDB Positron (Light)", "url": "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", "attr": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> &copy; <a href=\"https://carto.com/\">CARTO</a>"}, {"name": "CartoDB Dark Matter", "url": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", "attr": "&copy; OpenStreetMap &copy; CARTO"}, {"name": "OpenStreetMap", "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "attr": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors"}];
+
+// EXCLUIDO EL NA DE LA LISTA PRINCIPAL PARA ELIMINAR EL BOTÓN GRANDE
+const VECTOR_CLASSES = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]; 
+
+// ── Map init ──────────────────────────────────────────
+const map = L.map('map', {zoomControl: true});
+L.control.scale({position:'bottomright', metric:true, imperial:false}).addTo(map);
+
+let currentTile = null;
+function switchBasemap(idx) {
+  const bm = BASEMAPS[parseInt(idx)];
+  if (currentTile) map.removeLayer(currentTile);
+  currentTile = L.tileLayer(bm.url, {attribution: bm.attr, maxZoom:19}).addTo(map);
+  document.getElementById('bm-select').value = idx;
+}
+
+const bmSel = document.getElementById('bm-select');
+BASEMAPS.forEach((bm,i) => {
+  const opt = document.createElement('option');
+  opt.value = i; opt.textContent = bm.name;
+  bmSel.appendChild(opt);
+});
+switchBasemap(0);
+new L.Control.Fullscreen({position:'topright'}).addTo(map);
+
+// ── GeoJSON layer ─────────────────────────────────────
+let highlightedClass = null;
+
+function getStyle(feat) {
+  const p = feat.properties;
+  const currentCls = p.Bi_Class || p._cls;
+  if (currentCls === 'NA') {
+    return { fillColor: '#808080', fillOpacity: 0.82, color: '#666666', weight: 0.6 };
+  }
+  return { fillColor: p._fill || '#aaaaaa', fillOpacity: 0.82, color: p._stroke || '#888888', weight: 0.6 };
+}
+
+function highlightStyle(feat) {
+  const p = feat.properties;
+  const currentCls = p.Bi_Class || p._cls;
+  if (currentCls === 'NA') {
+    return { fillColor: '#808080', fillOpacity: 0.95, color: '#111', weight: 2 };
+  }
+  return { fillColor: p._fill || '#aaaaaa', fillOpacity: 0.95, color: '#111', weight: 2 };
+}
+
+const tooltip = L.tooltip({ sticky: true, opacity: 1, className: 'bv-tooltip' });
+
+const geoLayer = L.geoJSON(GEOJSON, {
+  style: getStyle,
+  onEachFeature: (feat, layer) => {
+    const p = feat.properties;
+    const currentCls = p.Bi_Class || p._cls;
+    const fill = currentCls === 'NA' ? '#808080' : (p._fill || '#aaa');
+    const textColor = isLight(fill) ? '#111' : '#fff';
+
+    const rows = Object.entries(p).filter(([k]) => !k.startsWith('_'))
+      .map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+    const name = p._label || p.Name || '';
+    const popupHtml = `<div class="bv-popup">
+        ${name ? `<div class="region-name">${name} <span class="cls-badge" style="background:${fill};color:${textColor}">${currentCls}</span></div>` 
+               : `<div class="region-name"><span class="cls-badge" style="background:${fill};color:${textColor}">${currentCls}</span></div>`}
+        ${rows ? `<table>${rows}</table>` : ''}
+      </div>`;
+    layer.bindPopup(popupHtml, {maxWidth:280});
+
+    layer.on('mouseover', e => {
+      if (!highlightedClass) {
+        layer.setStyle(highlightStyle(feat));
+        layer.bringToFront();
+      }
+      tooltip.setContent(`<strong>${name || currentCls}</strong>`);
+      layer.bindTooltip(tooltip).openTooltip(e.latlng);
+    });
+    layer.on('mousemove', e => tooltip.setLatLng(e.latlng));
+    layer.on('mouseout', () => {
+      if (!highlightedClass) geoLayer.resetStyle(layer);
+      layer.closeTooltip();
+    });
+  }
+}).addTo(map);
+
+if (GEOJSON.features.length > 0) {
+  try { map.fitBounds(geoLayer.getBounds(), {padding:[20,20]}); }
+  catch(e) { map.setView([0,20],3); }
+}
+
+// ── Legend cell interaction ────────────────────────────
+document.querySelectorAll('.lc').forEach(cell => {
+  cell.addEventListener('mouseenter', () => highlightClass(cell.dataset.cls, false));
+  cell.addEventListener('click', () => {
+    if (highlightedClass === cell.dataset.cls) resetHighlight();
+    else highlightClass(cell.dataset.cls, true);
+  });
+  cell.addEventListener('mouseleave', () => { if (!highlightedClass) resetHighlight(); });
+});
+
+function highlightClass(cls, lock) {
+  if (lock) highlightedClass = cls;
+  geoLayer.eachLayer(layer => {
+    const p = layer.feature.properties;
+    const currentCls = p.Bi_Class || p._cls;
+    if (currentCls === cls) {
+      layer.setStyle(highlightStyle(layer.feature));
+      layer.bringToFront();
+    } else {
+      let fColor = p._fill || '#aaa';
+      let sColor = p._stroke || '#888';
+      if (currentCls === 'NA') { fColor = '#808080'; sColor = '#666666'; }
+      layer.setStyle({ fillColor: fColor, fillOpacity: 0.18, color: sColor, weight: 0.3 });
+    }
+  });
+  document.querySelectorAll('.lc').forEach(c => {
+    c.classList.toggle('dimmed', c.dataset.cls !== cls);
+    c.classList.toggle('highlighted', c.dataset.cls === cls);
+  });
+}
+
+function resetHighlight() {
+  highlightedClass = null;
+  geoLayer.eachLayer(layer => geoLayer.resetStyle(layer));
+  document.querySelectorAll('.lc').forEach(c => c.classList.remove('dimmed','highlighted'));
+}
+document.getElementById('reset-btn').addEventListener('click', resetHighlight);
+
+// ── Render class chips ───────────────────────────
+const cgrid = document.getElementById('class-grid');
+VECTOR_CLASSES.forEach((cls) => {
+  const c = COLOR_MAP[cls] || '#ccc';
+  const chip = document.createElement('div');
+  chip.className = 'class-chip';
+  chip.style.background = c;
+  chip.style.color = isLight(c) ? '#111' : '#fff';
+  chip.innerHTML = `<div>${cls}</div><div style="font-size:9px;opacity:.8">${CLASS_COUNTS[cls] || 0}</div>`;
+  chip.addEventListener('click', () => {
+    if (highlightedClass === cls) resetHighlight();
+    else highlightClass(cls, true);
+  });
+  cgrid.appendChild(chip);
+});
+
+// Actualizar texto del NA inferior
+document.getElementById('na-count-text').innerText = `No data / unclassified (${CLASS_COUNTS["NA"]})`;
+
+// ── Color key ─────────────────────────────────────────
+const ckey = document.getElementById('color-key');
+VECTOR_CLASSES.forEach((cls) => {
+  const el = document.createElement('div');
+  el.className = 'ck-item';
+  el.innerHTML = `<div class="ck-swatch" style="background:${COLOR_MAP[cls]}"></div><span>${cls}</span>`;
+  ckey.appendChild(el);
+});
+
+// ── Theme toggle ──────────────────────────────────────
+let isDark = false;
+function toggleTheme() {
+  isDark = !isDark;
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('dark', isDark);
+  sb.classList.toggle('light', !isDark);
+  document.getElementById('theme-btn').textContent = isDark ? '☀ Light mode' : '☾ Dark mode';
+}
+
+function isLight(hex) {
+  const h = hex.replace('#','');
+  const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
+  return (r*299+g*587+b*114)/1000 > 155;
+}
+</script>
+</body>
+</html>
